@@ -84,8 +84,11 @@ function Install-Dependencies {
  }
  $needs = !(Test-Path -LiteralPath $modules -PathType Container) -or !(Test-Path -LiteralPath $stamp -PathType Leaf) -or ($previousHash -ne $lockHash)
  if (!$needs) {
-  & npm.cmd ls --depth=0 --all=false *> $null
-  $needs = ($LASTEXITCODE -ne 0)
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & npm.cmd ls --depth=0 --all=false *> $null; $npmExitCode = $LASTEXITCODE }
+  finally { $ErrorActionPreference = $oldPreference }
+  $needs = ($npmExitCode -ne 0)
  }
  if (!$needs) { return }
  Check-Disk
@@ -95,15 +98,30 @@ function Install-Dependencies {
  try {
   for ($attempt=1; $attempt -le 3; $attempt++) {
    Status "npm install attempt $attempt/3"
-   if (Test-Path -LiteralPath $lock) { & npm.cmd ci --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-   else { & npm.cmd install --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-   if ($LASTEXITCODE -eq 0) { $success = $true; break }
+   # Windows PowerShell 5.1 promotes native stderr to errors under Stop.
+   # Keep the native exit code authoritative and log both output streams.
+   $oldPreference = $ErrorActionPreference
+   $ErrorActionPreference = 'Continue'
+   try {
+    if (Test-Path -LiteralPath $lock) {
+     & npm.cmd ci --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8
+    } else {
+     & npm.cmd install --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8
+    }
+    $npmExitCode = $LASTEXITCODE
+   } finally {
+    $ErrorActionPreference = $oldPreference
+   }
+   if ($npmExitCode -eq 0) { $success = $true; break }
    if ($attempt -lt 3) { Start-Sleep -Seconds (2*$attempt) }
   }
   if (!$success) { throw 'npm dependencies installation failed after 3 attempts' }
   if (!(Test-Path -LiteralPath $modules -PathType Container)) { throw 'npm reported success but node_modules is missing' }
-  & npm.cmd ls --depth=0 *> $null
-  if ($LASTEXITCODE -ne 0) { throw 'npm dependency verification failed' }
+  $oldPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & npm.cmd ls --depth=0 *> $null; $npmExitCode = $LASTEXITCODE }
+  finally { $ErrorActionPreference = $oldPreference }
+  if ($npmExitCode -ne 0) { throw 'npm dependency verification failed' }
   [IO.File]::WriteAllText($stamp,$lockHash)
   if (Test-Path -LiteralPath $backup) {
    try { Remove-Item -LiteralPath $backup -Recurse -Force } catch { Status ('Backup cleanup warning: '+$_.Exception.Message) }
