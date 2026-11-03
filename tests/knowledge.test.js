@@ -12,3 +12,10 @@ test('search returns matches from notes and chat history',()=>{
  assert.equal(search(d,'world').length,2);
  assert.deepEqual(search(d,'x'),[]);
 });
+
+test('automatic folders group by first tag and retain untagged entries',()=>{
+ const {folders}=require('../knowledge');
+ const groups=folders([{id:'1',title:'One',content:'#work task'},{id:'2',title:'Two',content:'#work note'},{id:'3',title:'Three',content:'untagged'}]);
+ assert.equal(groups.find(g=>g.name==='work').count,2);
+ assert.equal(groups.find(g=>g.name==='Без категории').count,1);
+});
