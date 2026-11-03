@@ -77,7 +77,12 @@ function Install-Dependencies {
  $modules = Join-Path $root 'node_modules'
  $stamp = Join-Path $modules '.mienayura-lock.sha256'
  $lockHash = if (Test-Path -LiteralPath $lock) { (Get-FileHash -LiteralPath $lock -Algorithm SHA256).Hash } else { '' }
- $needs = !(Test-Path -LiteralPath $modules) -or !(Test-Path -LiteralPath $stamp) -or ((Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue).Trim() -ne $lockHash)
+ $previousHash = ''
+ if (Test-Path -LiteralPath $stamp -PathType Leaf) {
+  $previousHash = [string](Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue)
+  $previousHash = $previousHash.Trim()
+ }
+ $needs = !(Test-Path -LiteralPath $modules -PathType Container) -or !(Test-Path -LiteralPath $stamp -PathType Leaf) -or ($previousHash -ne $lockHash)
  if (!$needs) {
   & npm.cmd ls --depth=0 --all=false *> $null
   $needs = ($LASTEXITCODE -ne 0)
@@ -96,9 +101,13 @@ function Install-Dependencies {
    if ($attempt -lt 3) { Start-Sleep -Seconds (2*$attempt) }
   }
   if (!$success) { throw 'npm dependencies installation failed after 3 attempts' }
-  if (!(Test-Path -LiteralPath $modules)) { New-Item -ItemType Directory -Path $modules | Out-Null }
+  if (!(Test-Path -LiteralPath $modules -PathType Container)) { throw 'npm reported success but node_modules is missing' }
+  & npm.cmd ls --depth=0 *> $null
+  if ($LASTEXITCODE -ne 0) { throw 'npm dependency verification failed' }
   [IO.File]::WriteAllText($stamp,$lockHash)
-  if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+  if (Test-Path -LiteralPath $backup) {
+   try { Remove-Item -LiteralPath $backup -Recurse -Force } catch { Status ('Backup cleanup warning: '+$_.Exception.Message) }
+  }
  } catch {
   if (Test-Path -LiteralPath $modules) { Remove-Item -LiteralPath $modules -Recurse -Force }
   if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $modules }
