@@ -27,7 +27,7 @@ try {
  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $temp 'tools\launcher.ps1') -ProjectRoot $temp -Check
  Assert ($LASTEXITCODE -ne 0) 'Reject modified protected file'
  Copy-Item -LiteralPath $bat -Destination (Join-Path $temp 'Mienayura.bat') -Force
- & cmd.exe /d /c ('""{0}" -Check"' -f (Join-Path $temp 'Mienayura.bat'))
+ & (Join-Path $temp 'Mienayura.bat') -Check
  Assert ($LASTEXITCODE -eq 0) 'BAT launches from Cyrillic, spaces, parentheses and ampersand'
 } finally { Remove-Item -LiteralPath $temp -Recurse -Force }
 Write-Host 'All tests passed.'
