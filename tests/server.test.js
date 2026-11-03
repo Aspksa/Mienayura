@@ -1,0 +1,4 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),{createServer,validBase}=require('../server');
+test('Cloud.ru endpoint allowlist',()=>{assert.match(validBase('https://foundation-models.api.cloud.ru/v1'),/cloud\.ru/);for(const url of ['http://foundation-models.api.cloud.ru','https://evil.example/v1','https://cloud.ru.evil.example','https://x:y@cloud.ru'])assert.throws(()=>validBase(url))});
+test('health and static asset',async()=>{const server=createServer();await new Promise(r=>server.listen(0,'127.0.0.1',r));try{const base='http://127.0.0.1:'+server.address().port;let r=await fetch(base+'/api/health');assert.equal(r.status,200);assert.equal((await r.json()).ok,true);r=await fetch(base+'/');assert.equal(r.status,200);assert.match(await r.text(),/Mienayura/);r=await fetch(base+'/data/cloudru-settings.json');assert.equal(r.status,404)}finally{await new Promise(r=>server.close(r))}});
