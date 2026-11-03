@@ -1,0 +1,19 @@
+name: Node API tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check server.js
+          node --check app.js
+      - name: API tests
+        run: npm test
