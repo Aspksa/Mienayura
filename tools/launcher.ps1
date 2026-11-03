@@ -2,6 +2,7 @@ param(
   [Parameter(Mandatory=$true)][string]$ProjectRoot,
   [switch]$Check,
   [switch]$InstallPython,
+  [switch]$InstallNode,
   [switch]$NoPause
 )
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,36 @@ function Find-Python {
   }
   return $null
 }
+function Find-Node {
+  $node = Get-Command node.exe -ErrorAction SilentlyContinue
+  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+  if (-not $node -or -not $npm) { return $false }
+  try {
+    $version = (& node.exe --version 2>$null).Trim()
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+)\.') { return $false }
+    if ([int]$Matches[1] -lt 20) { Write-Status "Node.js is outdated: $version"; return $false }
+    & npm.cmd --version *> $null
+    return ($LASTEXITCODE -eq 0)
+  } catch { return $false }
+}
+function Require-Node {
+  if (Find-Node) { Write-Status ('Node.js available: ' + (& node.exe --version)); return $true }
+  Write-Status 'Node.js >=20 and npm.cmd are required.'
+  if (-not $InstallNode) {
+    Write-Status 'Run Mienayura.bat -InstallNode to install Node.js LTS with winget.'
+    return $false
+  }
+  if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+    Write-Status 'winget unavailable; install Node.js LTS from https://nodejs.org/'
+    return $false
+  }
+  Write-Status 'Installing Node.js LTS from official winget package...'
+  & winget.exe install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) { throw "Node installation failed: $LASTEXITCODE" }
+  $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  if (-not (Find-Node)) { Write-Status 'Node installed but not available yet. Restart launcher.'; return $false }
+  return $true
+}
 function Require-Python {
   $found = Find-Python
   if ($found) { Write-Status "Python available: $found"; return $true }
@@ -53,18 +84,20 @@ function Require-Python {
 try {
   Write-Status "Root: $root"
   if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Project folder missing' }
-  $python = Require-Python
+  $python = Find-Python
+  if ($InstallPython) { $python = Require-Python }
+  $node = Find-Node
+  if ($InstallNode) { $node = Require-Node }
   if ($Check) {
-    Write-Status ('CHECK: root exists; Python={0}' -f $python)
-    exit $(if ($python) {0} else {3})
+    Write-Status ('CHECK: root exists; Python={0}; Node={1}' -f [bool]$python, [bool]$node)
+    exit 0
   }
   $package = Join-Path $root 'package.json'
   if (-not (Test-Path -LiteralPath $package)) {
     Write-Status 'Application not initialized: package.json is missing. Launcher check complete.'
     exit 0
   }
-  if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) { throw 'Node.js is missing: https://nodejs.org/' }
-  if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm.cmd is missing' }
+  if (-not $node) { throw 'Node.js/npm unavailable or outdated. Run Mienayura.bat -InstallNode' }
   $manifest = Get-Content -LiteralPath $package -Raw -Encoding UTF8 | ConvertFrom-Json
   if (-not $manifest.scripts -or -not $manifest.scripts.start) { throw 'package.json has no scripts.start' }
   Push-Location -LiteralPath $root
