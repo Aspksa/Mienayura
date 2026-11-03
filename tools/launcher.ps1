@@ -1,243 +1,132 @@
 param(
-  [Parameter(Mandatory=$true)][string]$ProjectRoot,
-  [switch]$Check,
-  [switch]$InstallPython,
-  [switch]$InstallNode,
-  [switch]$NoPause
+ [Parameter(Mandatory=$true)][string]$ProjectRoot,
+ [switch]$Check, [switch]$InstallPython, [switch]$InstallNode,
+ [switch]$GenerateChecksums
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = [IO.Path]::GetFullPath($ProjectRoot)
-$logDir = Join-Path $root 'logs'
-New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-$log = Join-Path $logDir 'startup.log'
-function Write-Status([string]$message) {
-  Write-Host $message
-  Add-Content -LiteralPath $log -Value ('[{0}] {1}' -f (Get-Date -Format o), $message) -Encoding UTF8
+$log = Join-Path $root 'logs\startup.log'
+function Status([string]$msg) {
+ Write-Host $msg
+ try { Add-Content -LiteralPath $log -Encoding UTF8 -Value ("[{0}] {1}" -f (Get-Date -Format o),$msg) } catch { Write-Warning "Logging unavailable: $_" }
 }
-function Test-Integrity {
-  $manifestPath = Join-Path $root 'checksums.sha256'
-  if (-not (Test-Path -LiteralPath $manifestPath)) {
-    Write-Status 'No checksums.sha256: integrity verification skipped.'
-    return
-  }
-  foreach ($line in (Get-Content -LiteralPath $manifestPath -Encoding UTF8)) {
-    if (-not $line.Trim() -or $line.StartsWith('#')) { continue }
-    if ($line -notmatch '^([a-fA-F0-9]{64})\s+\*?(.+)
-  $candidates = @(
-    @{Exe='py.exe'; Args=@('-3.12','-c','import sys; print(sys.version_info[:2])')},
-    @{Exe='py.exe'; Args=@('-3','-c','import sys; print(sys.version_info[:2])')},
-    @{Exe='python.exe'; Args=@('-c','import sys; print(sys.version_info[:2])')}
-  )
-  foreach ($candidate in $candidates) {
-    if (-not (Get-Command $candidate.Exe -ErrorAction SilentlyContinue)) { continue }
-    try {
-      $output = & $candidate.Exe @($candidate.Args) 2>$null
-      if ($LASTEXITCODE -eq 0 -and $output) { return $candidate.Exe }
-    } catch { }
-  }
-  return $null
+function Check-Hash {
+ $manifest = Join-Path $root 'checksums.sha256'
+ if (!(Test-Path -LiteralPath $manifest)) { Status 'No checksum manifest (optional).'; return }
+ foreach ($line in (Get-Content -LiteralPath $manifest -Encoding UTF8)) {
+  if (!$line.Trim() -or $line.StartsWith('#')) { continue }
+  if ($line -notmatch '^([a-fA-F0-9]{64})\s+\*?(.+)$') { throw 'Malformed SHA256 manifest' }
+  $expected = $Matches[1]; $rel = $Matches[2]
+  if ([IO.Path]::IsPathRooted($rel) -or $rel -match '(^|[\\/])\.\.([\\/]|$)') { throw 'Unsafe SHA256 path' }
+  $path = [IO.Path]::GetFullPath((Join-Path $root $rel))
+  if (!$path.StartsWith($root.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'SHA256 path escapes project' }
+  if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing protected file: $rel" }
+  if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $expected) { throw "SHA256 mismatch: $rel" }
+  Status "SHA256 OK: $rel"
+ }
 }
-function Find-Node {
-  $node = Get-Command node.exe -ErrorAction SilentlyContinue
-  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-  if (-not $node -or -not $npm) { return $false }
+function Make-Hash {
+ $files = @('Mienayura.bat','tools/launcher.ps1')
+ $lines = foreach ($rel in $files) {
+  $path = Join-Path $root $rel
+  if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $rel" }
+  '{0}  {1}' -f (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(),$rel
+ }
+ [IO.File]::WriteAllLines((Join-Path $root 'checksums.sha256'),[string[]]$lines,(New-Object Text.UTF8Encoding($false)))
+ Status 'Generated checksums.sha256'
+}
+function Test-Node {
+ try {
+  if (!(Get-Command node.exe -ErrorAction SilentlyContinue) -or !(Get-Command npm.cmd -ErrorAction SilentlyContinue)) { return $false }
+  $v = & node.exe --version
+  if ($LASTEXITCODE -ne 0 -or $v -notmatch '^v(\d+)\.') { return $false }
+  if ([int]$Matches[1] -lt 20) { return $false }
+  & npm.cmd --version *> $null
+  return ($LASTEXITCODE -eq 0)
+ } catch { return $false }
+}
+function Test-Python {
+ foreach ($exe in @('py.exe','python.exe')) {
+  if (!(Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
   try {
-    $version = (& node.exe --version 2>$null).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+)\.') { return $false }
-    if ([int]$Matches[1] -lt 20) { Write-Status "Node.js is outdated: $version"; return $false }
-    & npm.cmd --version *> $null
-    return ($LASTEXITCODE -eq 0)
-  } catch { return $false }
+   if ($exe -eq 'py.exe') { & py.exe -3 -c 'import sys; assert sys.version_info >= (3,10)' 2>$null }
+   else { & python.exe -c 'import sys; assert sys.version_info >= (3,10)' 2>$null }
+   if ($LASTEXITCODE -eq 0) { return $true }
+  } catch {}
+ }
+ return $false
 }
-function Require-Node {
-  if (Find-Node) { Write-Status ('Node.js available: ' + (& node.exe --version)); return $true }
-  Write-Status 'Node.js >=20 and npm.cmd are required.'
-  if (-not $InstallNode) {
-    Write-Status 'Run Mienayura.bat -InstallNode to install Node.js LTS with winget.'
-    return $false
-  }
-  if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-    Write-Status 'winget unavailable; install Node.js LTS from https://nodejs.org/'
-    return $false
-  }
-  Write-Status 'Installing Node.js LTS from official winget package...'
-  & winget.exe install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "Node installation failed: $LASTEXITCODE" }
-  $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-  if (-not (Find-Node)) { Write-Status 'Node installed but not available yet. Restart launcher.'; return $false }
-  return $true
+function Install-Package([string]$id) {
+ if (!(Get-Command winget.exe -ErrorAction SilentlyContinue)) { throw 'winget unavailable' }
+ & winget.exe install --id $id --exact --source winget --accept-package-agreements --accept-source-agreements
+ if ($LASTEXITCODE -ne 0) { throw "winget failed: $id ($LASTEXITCODE)" }
+ $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')
 }
-function Require-Python {
-  $found = Find-Python
-  if ($found) { Write-Status "Python available: $found"; return $true }
-  Write-Status 'Python is missing.'
-  if (-not $InstallPython) {
-    Write-Status 'To install Python automatically, run Mienayura.bat -InstallPython'
-    return $false
+function Check-Disk {
+ $drive = [IO.Path]::GetPathRoot($root)
+ $info = New-Object IO.DriveInfo($drive)
+ if ($info.IsReady -and $info.AvailableFreeSpace -lt 1073741824) { throw 'Less than 1 GiB free space' }
+}
+function Check-Write {
+ $probe = Join-Path $root ('.write-test-'+[guid]::NewGuid().ToString('N'))
+ try { [IO.File]::WriteAllText($probe,'ok') } finally { if (Test-Path -LiteralPath $probe) { Remove-Item -LiteralPath $probe -Force } }
+}
+function Install-Dependencies {
+ $lock = Join-Path $root 'package-lock.json'
+ $modules = Join-Path $root 'node_modules'
+ $stamp = Join-Path $modules '.mienayura-lock.sha256'
+ $lockHash = if (Test-Path -LiteralPath $lock) { (Get-FileHash -LiteralPath $lock -Algorithm SHA256).Hash } else { '' }
+ $needs = !(Test-Path -LiteralPath $modules) -or !(Test-Path -LiteralPath $stamp) -or ((Get-Content -LiteralPath $stamp -Raw -ErrorAction SilentlyContinue).Trim() -ne $lockHash)
+ if (!$needs) {
+  & npm.cmd ls --depth=0 --all=false *> $null
+  $needs = ($LASTEXITCODE -ne 0)
+ }
+ if (!$needs) { return }
+ Check-Disk
+ $backup = Join-Path $root ('node_modules.backup.'+[guid]::NewGuid().ToString('N'))
+ if (Test-Path -LiteralPath $modules) { Move-Item -LiteralPath $modules -Destination $backup }
+ $success = $false
+ try {
+  for ($attempt=1; $attempt -le 3; $attempt++) {
+   Status "npm install attempt $attempt/3"
+   if (Test-Path -LiteralPath $lock) { & npm.cmd ci --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
+   else { & npm.cmd install --no-audit --no-fund 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
+   if ($LASTEXITCODE -eq 0) { $success = $true; break }
+   if ($attempt -lt 3) { Start-Sleep -Seconds (2*$attempt) }
   }
-  if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-    Write-Status 'winget is unavailable. Install Python from https://www.python.org/downloads/windows/'
-    return $false
-  }
-  Write-Status 'Installing Python 3.12 using Windows Package Manager...'
-  & winget.exe install --id Python.Python.3.12 --exact --source winget --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "Python installation failed with code $LASTEXITCODE" }
-  $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-  $found = Find-Python
-  if (-not $found) { Write-Status 'Python installed; reopen terminal if command is not available yet.'; return $false }
-  Write-Status "Python installed: $found"
-  return $true
+  if (!$success) { throw 'npm dependencies installation failed after 3 attempts' }
+  if (!(Test-Path -LiteralPath $modules)) { New-Item -ItemType Directory -Path $modules | Out-Null }
+  [IO.File]::WriteAllText($stamp,$lockHash)
+  if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Recurse -Force }
+ } catch {
+  if (Test-Path -LiteralPath $modules) { Remove-Item -LiteralPath $modules -Recurse -Force }
+  if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $modules }
+  throw
+ }
 }
 try {
-  Write-Status "Root: $root"
-  if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Project folder missing' }
-  Test-Integrity
-  $python = Find-Python
-  if ($InstallPython) { $python = Require-Python }
-  $node = Find-Node
-  if ($InstallNode) { $node = Require-Node }
-  if ($Check) {
-    Write-Status ('CHECK: root exists; Python={0}; Node={1}' -f [bool]$python, [bool]$node)
-    exit 0
-  }
-  $package = Join-Path $root 'package.json'
-  if (-not (Test-Path -LiteralPath $package)) {
-    Write-Status 'Application not initialized: package.json is missing. Launcher check complete.'
-    exit 0
-  }
-  if (-not $node) { throw 'Node.js/npm unavailable or outdated. Run Mienayura.bat -InstallNode' }
-  $manifest = Get-Content -LiteralPath $package -Raw -Encoding UTF8 | ConvertFrom-Json
-  if (-not $manifest.scripts -or -not $manifest.scripts.start) { throw 'package.json has no scripts.start' }
-  Push-Location -LiteralPath $root
-  try {
-    if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules'))) {
-      Write-Status 'Installing Node dependencies...'
-      if (Test-Path -LiteralPath (Join-Path $root 'package-lock.json')) { & npm.cmd ci 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-      else { & npm.cmd install 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-      if ($LASTEXITCODE -ne 0) { throw "npm install failed: $LASTEXITCODE" }
-    }
-    Write-Status 'Starting application...'
-    & npm.cmd run start
-    if ($LASTEXITCODE -ne 0) { throw "Application exited with code $LASTEXITCODE" }
-  } finally { Pop-Location }
-  exit 0
+ if (!(Test-Path -LiteralPath $root -PathType Container)) { throw 'Project directory missing' }
+ New-Item -ItemType Directory -Path (Join-Path $root 'logs') -Force | Out-Null
+ Check-Write
+ if ($GenerateChecksums) { Make-Hash; exit 0 }
+ Check-Hash
+ $node = Test-Node; $python = Test-Python
+ if ($InstallNode -and !$node) { Install-Package 'OpenJS.NodeJS.LTS'; $node = Test-Node }
+ if ($InstallPython -and !$python) { Install-Package 'Python.Python.3.12'; $python = Test-Python }
+ if ($Check) { Status "CHECK Node=$node Python=$python"; exit 0 }
+ if (!(Test-Path -LiteralPath (Join-Path $root 'package.json'))) { Status 'No package.json yet: application not initialized'; exit 0 }
+ if (!$node) { throw 'Node.js >=20 or npm missing. Use -InstallNode' }
+ $manifest = Get-Content -LiteralPath (Join-Path $root 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+ if (!$manifest.scripts -or !$manifest.scripts.start) { throw 'Missing npm start script' }
+ Push-Location -LiteralPath $root
+ try {
+  Install-Dependencies
+  & npm.cmd run start
+  if ($LASTEXITCODE -ne 0) { throw "App failed: $LASTEXITCODE" }
+ } finally { Pop-Location }
+ exit 0
 } catch {
-  Write-Status ('ERROR: ' + $_.Exception.Message)
-  exit 1
-}
-) { throw 'Malformed checksums.sha256 entry' }
-    $expected = $Matches[1].ToUpperInvariant()
-    $relative = $Matches[2].Trim()
-    if ([IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\\/])\.\.([\\/]|$)') { throw 'Unsafe checksum path' }
-    $target = [IO.Path]::GetFullPath((Join-Path $root $relative))
-    $prefix = $root.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $target.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw 'Checksum path escapes root' }
-    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "Missing integrity file: $relative" }
-    $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-    if ($actual -ne $expected) { throw "SHA256 mismatch: $relative" }
-    Write-Status "SHA256 OK: $relative"
-  }
-}
-function Find-Python {
-  $candidates = @(
-    @{Exe='py.exe'; Args=@('-3.12','-c','import sys; print(sys.version_info[:2])')},
-    @{Exe='py.exe'; Args=@('-3','-c','import sys; print(sys.version_info[:2])')},
-    @{Exe='python.exe'; Args=@('-c','import sys; print(sys.version_info[:2])')}
-  )
-  foreach ($candidate in $candidates) {
-    if (-not (Get-Command $candidate.Exe -ErrorAction SilentlyContinue)) { continue }
-    try {
-      $output = & $candidate.Exe @($candidate.Args) 2>$null
-      if ($LASTEXITCODE -eq 0 -and $output) { return $candidate.Exe }
-    } catch { }
-  }
-  return $null
-}
-function Find-Node {
-  $node = Get-Command node.exe -ErrorAction SilentlyContinue
-  $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
-  if (-not $node -or -not $npm) { return $false }
-  try {
-    $version = (& node.exe --version 2>$null).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^v(\d+)\.') { return $false }
-    if ([int]$Matches[1] -lt 20) { Write-Status "Node.js is outdated: $version"; return $false }
-    & npm.cmd --version *> $null
-    return ($LASTEXITCODE -eq 0)
-  } catch { return $false }
-}
-function Require-Node {
-  if (Find-Node) { Write-Status ('Node.js available: ' + (& node.exe --version)); return $true }
-  Write-Status 'Node.js >=20 and npm.cmd are required.'
-  if (-not $InstallNode) {
-    Write-Status 'Run Mienayura.bat -InstallNode to install Node.js LTS with winget.'
-    return $false
-  }
-  if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-    Write-Status 'winget unavailable; install Node.js LTS from https://nodejs.org/'
-    return $false
-  }
-  Write-Status 'Installing Node.js LTS from official winget package...'
-  & winget.exe install --id OpenJS.NodeJS.LTS --exact --source winget --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "Node installation failed: $LASTEXITCODE" }
-  $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-  if (-not (Find-Node)) { Write-Status 'Node installed but not available yet. Restart launcher.'; return $false }
-  return $true
-}
-function Require-Python {
-  $found = Find-Python
-  if ($found) { Write-Status "Python available: $found"; return $true }
-  Write-Status 'Python is missing.'
-  if (-not $InstallPython) {
-    Write-Status 'To install Python automatically, run Mienayura.bat -InstallPython'
-    return $false
-  }
-  if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
-    Write-Status 'winget is unavailable. Install Python from https://www.python.org/downloads/windows/'
-    return $false
-  }
-  Write-Status 'Installing Python 3.12 using Windows Package Manager...'
-  & winget.exe install --id Python.Python.3.12 --exact --source winget --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "Python installation failed with code $LASTEXITCODE" }
-  $env:PATH = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
-  $found = Find-Python
-  if (-not $found) { Write-Status 'Python installed; reopen terminal if command is not available yet.'; return $false }
-  Write-Status "Python installed: $found"
-  return $true
-}
-try {
-  Write-Status "Root: $root"
-  if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw 'Project folder missing' }
-  $python = Find-Python
-  if ($InstallPython) { $python = Require-Python }
-  $node = Find-Node
-  if ($InstallNode) { $node = Require-Node }
-  if ($Check) {
-    Write-Status ('CHECK: root exists; Python={0}; Node={1}' -f [bool]$python, [bool]$node)
-    exit 0
-  }
-  $package = Join-Path $root 'package.json'
-  if (-not (Test-Path -LiteralPath $package)) {
-    Write-Status 'Application not initialized: package.json is missing. Launcher check complete.'
-    exit 0
-  }
-  if (-not $node) { throw 'Node.js/npm unavailable or outdated. Run Mienayura.bat -InstallNode' }
-  $manifest = Get-Content -LiteralPath $package -Raw -Encoding UTF8 | ConvertFrom-Json
-  if (-not $manifest.scripts -or -not $manifest.scripts.start) { throw 'package.json has no scripts.start' }
-  Push-Location -LiteralPath $root
-  try {
-    if (-not (Test-Path -LiteralPath (Join-Path $root 'node_modules'))) {
-      Write-Status 'Installing Node dependencies...'
-      if (Test-Path -LiteralPath (Join-Path $root 'package-lock.json')) { & npm.cmd ci 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-      else { & npm.cmd install 2>&1 | Out-File -LiteralPath $log -Append -Encoding UTF8 }
-      if ($LASTEXITCODE -ne 0) { throw "npm install failed: $LASTEXITCODE" }
-    }
-    Write-Status 'Starting application...'
-    & npm.cmd run start
-    if ($LASTEXITCODE -ne 0) { throw "Application exited with code $LASTEXITCODE" }
-  } finally { Pop-Location }
-  exit 0
-} catch {
-  Write-Status ('ERROR: ' + $_.Exception.Message)
-  exit 1
+ Status ('ERROR: '+$_.Exception.Message)
+ exit 1
 }
