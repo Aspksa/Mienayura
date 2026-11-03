@@ -1,6 +1,6 @@
 'use strict';
 const http=require('node:http'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
-const {graph,search}=require('./knowledge');
+const {graph,search,folders}=require('./knowledge');
 const root=__dirname, dataDir=path.join(root,'data'), configFile=path.join(dataDir,'cloudru-settings.json'), dbFile=path.join(dataDir,'workspace.json');
 const initial=()=>({chats:[],tasks:[],memories:[],notes:[]});
 const safeRead=(file,fallback)=>{try{return JSON.parse(fs.readFileSync(file,'utf8'))}catch{return fallback}};
@@ -21,6 +21,7 @@ function route(req,res){return (async()=>{
  if(p==='/api/settings'&&req.method==='POST'){const x=await body(req),s=settings();if(x.baseUrl!==undefined)s.baseUrl=validBase(x.baseUrl);if(x.model!==undefined)s.model=cleanText(x.model,200);if(x.apiKey!==undefined){if(typeof x.apiKey!=='string'||x.apiKey.length>4096)throw Error('Invalid key');if(x.apiKey)s.apiKey=x.apiKey;else delete s.apiKey}write(configFile,s);return json(res,200,publicSettings())}
  if(p==='/api/models'&&req.method==='GET'){const r=await cloud('/models');return json(res,r.status,await r.json())}
  if(p==='/api/graph'&&req.method==='GET')return json(res,200,graph(db().memories));
+ if(p==='/api/folders'&&req.method==='GET')return json(res,200,{folders:folders(db().memories)});
  if(p==='/api/search'&&req.method==='GET')return json(res,200,{results:search(db(),u.searchParams.get('q'))});
  if(p==='/api/workspace'&&req.method==='GET')return json(res,200,db());
  if(p==='/api/workspace'&&req.method==='POST'){const x=await body(req),d=db();if(!['chats','tasks','memories','notes'].includes(x.collection))return json(res,400,{error:'Invalid collection'});const item=x.item;if(!item||typeof item!=='object'||Array.isArray(item))return json(res,400,{error:'Invalid item'});const value={...item,id:crypto.randomUUID(),createdAt:new Date().toISOString()};d[x.collection].push(value);write(dbFile,d);return json(res,201,value)}
