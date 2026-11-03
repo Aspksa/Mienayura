@@ -33,7 +33,7 @@ function Make-Hash {
   if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing file: $rel" }
   '{0}  {1}' -f (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant(),$rel
  }
- [IO.File]::WriteAllLines((Join-Path $root 'checksums.sha256'),[string[]]$lines,(New-Object Text.UTF8Encoding($false)))
+ [IO.File]::WriteAllLines((Join-Path $root 'checksums.sha256'),[string[]]$lines,(New-Object System.Text.UTF8Encoding -ArgumentList @($false)))
  Status 'Generated checksums.sha256'
 }
 function Test-Node {
