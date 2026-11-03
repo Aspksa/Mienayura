@@ -19,6 +19,8 @@ Assert ($source.Contains('function Find-Node')) 'Node version and npm checks'
 Assert ($source.Contains('if ($InstallNode)')) 'Node installation opt-in switch'
 Assert ($source.Contains('if ($InstallPython)')) 'Python installation opt-in switch'
 Assert ($source.Contains('npm.cmd')) 'PowerShell execution-policy-safe npm invocation'
+Assert ($source.Contains('Get-FileHash -LiteralPath $target -Algorithm SHA256')) 'SHA256 verification available'
+Assert ($source.Contains('Checksum path escapes root')) 'Checksum path traversal blocked'
 Assert ($source.Contains('startup.log')) 'Diagnostic log configured'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('Mienayura тест путь ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp -Force | Out-Null
