@@ -8,7 +8,7 @@ if not exist "%MIENAYURA_ROOT%tools\launcher.ps1" (
   pause
   exit /b 2
 )
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%MIENAYURA_ROOT%tools\launcher.ps1" -ProjectRoot "%MIENAYURA_ROOT%" %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%MIENAYURA_ROOT%tools\launcher.ps1" -ProjectRoot "%MIENAYURA_ROOT%." %*
 set "EXITCODE=%ERRORLEVEL%"
 if not "%EXITCODE%"=="0" (
   echo [ERROR] Launcher exited with code %EXITCODE%.
