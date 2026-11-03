@@ -1,0 +1,13 @@
+name: Windows launcher tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify launcher with Cyrillic and spaces
+        shell: powershell
+        run: .\tests\test-launcher.ps1
