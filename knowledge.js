@@ -24,4 +24,14 @@ function search(workspace,query){
  }
  return results;
 }
-module.exports={graph,search};
+function folders(memories){
+ const grouped=new Map();
+ for(const item of memories||[]){
+  const tag=(String(item.content||'').match(/#[a-zA-Z0-9_-]{2,40}/)||[])[0];
+  const name=tag?tag.slice(1).toLowerCase():'Без категории';
+  if(!grouped.has(name))grouped.set(name,[]);
+  grouped.get(name).push({id:item.id,title:String(item.title||'Запись').slice(0,120)});
+ }
+ return [...grouped].map(([name,items])=>({name,count:items.length,items})).sort((a,b)=>b.count-a.count);
+}
+module.exports={graph,search,folders};
