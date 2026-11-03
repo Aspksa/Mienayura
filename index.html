@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mienayura</title><link rel="stylesheet" href="/styles.css"></head>
+<body>
+<header class="mobile-top"><button id="menuToggle" aria-label="Открыть меню" aria-expanded="false">☰</button><strong>Mienayura</strong></header>
+<aside id="sidebar" class="sidebar"><div class="brand">✦ Mienayura</div><nav aria-label="Главное меню"><button data-page="Дела" class="active">Дела</button><button data-page="Мозг">Мозг</button><button data-page="Обновление">Обновление</button><button data-page="Настройки">Настройки</button></nav></aside>
+<div id="shade" class="shade" hidden></div>
+<main id="main"><div class="eyebrow">ЛИЧНОЕ ПРОСТРАНСТВО</div><h1 id="pageTitle">Дела</h1><section class="welcome"><h2 id="sectionTitle">Ваши дела</h2><p id="sectionDescription">Здесь появятся задачи, планы и напоминания. Пока данных нет.</p></section></main>
+<button id="avatar" aria-label="Открыть чат" title="Перетащите для перемещения. Стрелки — для клавиатуры">✦</button>
+<section id="chat" class="chat" role="dialog" aria-label="Чат Mienayura" aria-modal="false" hidden>
+ <div id="chatHeader" class="chat-header"><div class="chat-name"><span class="chat-dot">✦</span><div><strong>Mienayura</strong><small>Личный помощник</small></div></div><div class="chat-actions"><button id="viewToggle" aria-expanded="false" aria-label="Настройки вида">Вид</button><button id="maximize" aria-label="Развернуть чат">□</button><button id="closeChat" aria-label="Закрыть чат">×</button></div></div>
+ <div id="viewMenu" class="view-menu" hidden><label>Плотность<select id="density"><option value="comfortable">Свободно</option><option value="compact">Компактно</option></select></label><label>Размер текста<select id="fontSize"><option value="small">Мелкий</option><option value="normal">Обычный</option><option value="large">Крупный</option></select></label></div>
+ <div class="messages" id="messages"><div class="intro"><span>✦</span><h2>Чем я могу помочь?</h2><p>Интерфейс чата готов. Подключение ИИ-модели будет отдельным этапом.</p></div></div>
+ <form id="composer"><textarea id="messageInput" rows="2" placeholder="Напишите сообщение…" aria-label="Сообщение"></textarea><button type="submit" aria-label="Отправить сообщение">↑</button></form>
+</section><script src="/app.js"></script></body></html>
