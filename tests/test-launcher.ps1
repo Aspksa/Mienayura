@@ -15,6 +15,7 @@ Assert ($source.Contains('Get-FileHash')) 'SHA256 checks'
 Assert ($source.Contains('function Make-Hash')) 'SHA256 generation'
 Assert ($source.Contains('npm may legitimately create no node_modules')) 'Zero-dependency app supported'
 Assert ((Get-Content -LiteralPath $bat -Raw).Contains('%~dp0')) 'BAT path anchored to itself'
+Assert ((Get-Content -LiteralPath $bat -Raw).Contains('%MIENAYURA_ROOT%.')) 'BAT avoids trailing backslash in quoted native argument'
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('Миена тест (скобки) & кавычки пробелы '+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $temp 'tools') -Force | Out-Null
 try {
