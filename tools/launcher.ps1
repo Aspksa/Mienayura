@@ -116,7 +116,10 @@ function Install-Dependencies {
    if ($attempt -lt 3) { Start-Sleep -Seconds (2*$attempt) }
   }
   if (!$success) { throw 'npm dependencies installation failed after 3 attempts' }
-  if (!(Test-Path -LiteralPath $modules -PathType Container)) { throw 'npm reported success but node_modules is missing' }
+  # npm may legitimately create no node_modules when package.json has zero dependencies.
+  if (!(Test-Path -LiteralPath $modules -PathType Container)) {
+   New-Item -ItemType Directory -Path $modules -Force | Out-Null
+  }
   $oldPreference = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   try { & npm.cmd ls --depth=0 *> $null; $npmExitCode = $LASTEXITCODE }
